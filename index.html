@@ -168,6 +168,18 @@
       </div>
     </main>
 
+    <footer class="w-full border-t-2 border-ink bg-paper mt-auto">
+      <div class="max-w-md md:max-w-5xl mx-auto px-3 md:px-6 h-11 flex items-center justify-center gap-3 text-xs font-mono-spec text-muted">
+        <span>
+          &copy; 2026 <a href="https://jantokarzewski.pl/en" target="_blank" rel="noopener noreferrer" class="text-ink underline hover:opacity-80">Jan Tokarzewski</a>
+        </span>
+        <span>&middot;</span>
+        <button type="button" data-open-modal="modal-privacy" class="text-ink underline hover:opacity-80 cursor-pointer">
+          Privacy Policy
+        </button>
+      </div>
+    </footer>
+
     <div id="modal-how-to-play" class="hidden fixed inset-0 z-50 items-center justify-center p-4 bg-black/60" role="dialog" aria-modal="true">
       <div class="w-full max-w-md border-2 border-ink bg-card p-5 space-y-4">
         <div class="flex items-center justify-between border-b-2 border-ink pb-2.5">
@@ -178,8 +190,9 @@
           <p>Match the daily <strong>Target Swatch</strong> in <strong>5 tries</strong> by mixing <strong>Cyan (C)</strong>, <strong>Magenta (M)</strong>, <strong>Yellow (Y)</strong>, and <strong>Key / Black (K)</strong>.</p>
           <ul class="list-disc pl-5 space-y-1 text-xs text-muted">
             <li>Every target channel is a multiple of <strong>5</strong> (0 to 100).</li>
-            <li>A channel counts as correct (<strong>✓</strong>) when your guess is within <strong>±2</strong> of the target.</li>
-            <li><strong>▲</strong> means the target is higher; <strong>▼</strong> means the target is lower.</li>
+            <li><strong>✓</strong> (solid cell) means the channel is exact (within <strong>±2</strong>).</li>
+            <li><strong>~</strong> (shaded cell) means the channel is close (within <strong>±15</strong>).</li>
+            <li><strong>—</strong> means the channel is off by more than 15.</li>
           </ul>
         </div>
         <button type="button" data-close-modal="modal-how-to-play" class="w-full py-2.5 font-mono-spec font-bold text-xs uppercase tracking-widest bg-ink text-paper cursor-pointer">
@@ -285,26 +298,36 @@
     </div>
 
     <div id="modal-about" class="hidden fixed inset-0 z-50 items-center justify-center p-4 bg-black/60" role="dialog" aria-modal="true">
-      <div class="w-full max-w-md border-2 border-ink bg-card p-5 space-y-4 max-h-[85vh] overflow-y-auto">
+      <div class="w-full max-w-md border-2 border-ink bg-card p-5 space-y-4">
         <div class="flex items-center justify-between border-b-2 border-ink pb-2.5">
           <h2 class="font-display text-base font-bold uppercase tracking-tight">About</h2>
           <button type="button" data-close-modal="modal-about" class="font-mono-spec text-xs font-bold px-2 py-0.5 border border-ink cursor-pointer">CLOSE</button>
         </div>
 
-        <div class="space-y-1.5 text-xs leading-relaxed text-muted">
-          <h3 class="font-mono-spec text-xs uppercase tracking-wider text-ink">Creator</h3>
+        <div class="space-y-2.5 text-xs sm:text-sm leading-relaxed text-muted">
           <p>
-            Subtra is an independent daily color-mixing puzzle by <a href="https://jantokarzewski.pl/en" target="_blank" rel="noopener noreferrer" class="text-ink underline hover:opacity-80">Jan Tokarzewski</a>.
+            Subtra is a daily subtractive color-mixing puzzle created by <a href="https://jantokarzewski.pl/en" target="_blank" rel="noopener noreferrer" class="text-ink underline hover:opacity-80">Jan Tokarzewski</a>.
+          </p>
+          <p>
+            Unlike additive screen colors (RGB), print pigments work by subtracting light from paper using Cyan, Magenta, Yellow, and Key (Black). Subtra challenges you to eyeball and mix the daily swatch in five tries.
           </p>
         </div>
+      </div>
+    </div>
 
-        <div class="border-t border-ink/20 pt-3 space-y-2.5 text-xs leading-relaxed text-muted">
-          <h3 class="font-mono-spec text-xs uppercase tracking-wider text-ink">Privacy Policy</h3>
+    <div id="modal-privacy" class="hidden fixed inset-0 z-50 items-center justify-center p-4 bg-black/60" role="dialog" aria-modal="true">
+      <div class="w-full max-w-md border-2 border-ink bg-card p-5 space-y-4 max-h-[85vh] overflow-y-auto">
+        <div class="flex items-center justify-between border-b-2 border-ink pb-2.5">
+          <h2 class="font-display text-base font-bold uppercase tracking-tight">Privacy Policy</h2>
+          <button type="button" data-close-modal="modal-privacy" class="font-mono-spec text-xs font-bold px-2 py-0.5 border border-ink cursor-pointer">CLOSE</button>
+        </div>
+
+        <div class="space-y-2.5 text-xs leading-relaxed text-muted">
           <p>
             The data controller is Jan Tokarzewski (<a href="https://jantokarzewski.pl/en" target="_blank" rel="noopener noreferrer" class="underline text-ink">jantokarzewski.pl/en</a>). For privacy questions or data requests, email <a href="mailto:dev@jantokarzewski.pl" class="text-ink underline">dev@jantokarzewski.pl</a>.
           </p>
           <p>
-            To run the game and prevent abuse (Art. 6(1)(b) and (f) GDPR), we store an anonymous session ID, your daily guesses, game results, and streak counts. If you choose to sign in with Google to sync your progress across devices, your email address and basic Google profile identifier are also stored.
+            To run the game and prevent abuse (Art. 6(1)(b) and (f) GDPR), we store an anonymous session ID, your daily guesses, game results, and streak counts. If you choose to sign in with email or Google to sync your progress across devices, your email address and basic profile identifier are also stored.
           </p>
           <p>
             Subtra does not use advertising, profiling, or analytics cookies, and all fonts are self-hosted. Browser localStorage is used only for strictly necessary technical storage: remembering your theme setting, active puzzle state, local stats, and login session.
@@ -315,10 +338,6 @@
           <p>
             Under GDPR (Articles 15–21), you have the right to access, correct, delete, restrict, or export your data, and to file a complaint with your data protection authority (in Poland: PUODO). You can permanently delete your account and all stored data at any time using the Delete Account &amp; Data button in the Account menu, or by emailing <a href="mailto:dev@jantokarzewski.pl" class="text-ink underline">dev@jantokarzewski.pl</a>.
           </p>
-        </div>
-
-        <div class="border-t border-ink/20 pt-3 space-y-1.5 text-xs leading-relaxed text-muted">
-          <h3 class="font-mono-spec text-xs uppercase tracking-wider text-ink">Terms</h3>
           <p>
             Subtra is provided free of charge as-is without warranty. Color names are descriptive only; Subtra is an independent project and is not affiliated with Pantone LLC or any ink manufacturer.
           </p>

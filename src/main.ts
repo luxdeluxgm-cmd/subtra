@@ -137,11 +137,17 @@ function renderHintCell(label: string, hint: ChannelHint, value: number): string
       <span class="text-[10px]">✓</span>
     </div>`;
   }
-  const arrow = hint === 'higher' ? '▲' : '▼';
-  return `<div class="py-2 px-1.5 md:px-2.5 flex items-center justify-between font-mono-spec text-xs">
-    <span class="text-muted text-[10px]">${label}</span>
-    <span class="font-bold">${value}</span>
-    <span class="text-[10px] font-bold">${arrow}</span>
+  if (hint === 'close') {
+    return `<div class="py-2 px-1.5 md:px-2.5 flex items-center justify-between bg-ink/15 text-ink font-mono-spec text-xs font-bold">
+      <span class="text-muted text-[10px]">${label}</span>
+      <span>${value}</span>
+      <span class="text-[11px] font-bold">~</span>
+    </div>`;
+  }
+  return `<div class="py-2 px-1.5 md:px-2.5 flex items-center justify-between font-mono-spec text-xs text-muted">
+    <span class="text-[10px] opacity-75">${label}</span>
+    <span>${value}</span>
+    <span class="text-[10px] opacity-60">—</span>
   </div>`;
 }
 
@@ -155,14 +161,14 @@ function buildShareText(): string {
               .map((ch) =>
                 r.hints[ch] === 'perfect'
                   ? '🟩'
-                  : r.hints[ch] === 'higher'
-                  ? '🔼'
-                  : '🔽'
+                  : r.hints[ch] === 'close'
+                  ? '🟨'
+                  : '⬜'
               )
               .join('')
           )
           .join('\n')
-      : '🟩🔼🔽🟩';
+      : '🟩🟨⬜🟩';
   return `Subtra #${puzzleNumber} ${score}\n${grid}`;
 }
 
@@ -399,11 +405,17 @@ initAuth(async (user) => {
   googleBtn.classList.toggle('hidden', isPermanent);
   signOutBtn.classList.toggle('hidden', !isPermanent);
 
-  accountStatusBox.innerHTML = `<p class="font-mono-spec font-bold">${label}</p><p class="text-muted">${
-    isPermanent
-      ? 'This account works across both Subtra and Idiomatic.'
-      : 'Sign in with email or Google to sync your streak across devices and games.'
-  }</p>`;
+  const titleEl = document.createElement('p');
+  titleEl.className = 'font-mono-spec font-bold break-all';
+  titleEl.textContent = label;
+
+  const descEl = document.createElement('p');
+  descEl.className = 'text-muted';
+  descEl.textContent = isPermanent
+    ? 'This account works across both Subtra and Idiomatic.'
+    : 'Sign in with email or Google to sync your streak across devices and games.';
+
+  accountStatusBox.replaceChildren(titleEl, descEl);
 
   await syncFromServer();
 });

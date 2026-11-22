@@ -7,7 +7,8 @@ as $$
 declare
   v_today date := (now() at time zone 'utc')::date;
   v_user_id uuid := auth.uid();
-  v_puzzle record;
+  v_puzzle_number int;
+  v_payload jsonb;
   v_c numeric;
   v_m numeric;
   v_y numeric;
@@ -16,36 +17,36 @@ declare
   v_g int;
   v_b int;
   v_attempts jsonb := '[]'::jsonb;
-  v_history record;
-  v_streak record;
   v_played int := 0;
   v_wins int := 0;
+  v_current_streak int := 0;
+  v_best_streak int := 0;
   v_game_over boolean := false;
   v_won boolean := false;
 begin
-  select id, puzzle_number, payload
-  into v_puzzle
+  select puzzle_number, payload
+  into v_puzzle_number, v_payload
   from public.puzzles
   where game = 'subtra' and puzzle_date = v_today
   limit 1;
 
-  if v_puzzle is null then
-    select id, puzzle_number, payload
-    into v_puzzle
+  if v_payload is null then
+    select puzzle_number, payload
+    into v_puzzle_number, v_payload
     from public.puzzles
     where game = 'subtra'
     order by puzzle_date desc
     limit 1;
   end if;
 
-  if v_puzzle is null then
+  if v_payload is null then
     raise exception 'No puzzle found';
   end if;
 
-  v_c := (v_puzzle.payload ->> 'c')::numeric;
-  v_m := (v_puzzle.payload ->> 'm')::numeric;
-  v_y := (v_puzzle.payload ->> 'y')::numeric;
-  v_k := (v_puzzle.payload ->> 'k')::numeric;
+  v_c := (v_payload ->> 'c')::numeric;
+  v_m := (v_payload ->> 'm')::numeric;
+  v_y := (v_payload ->> 'y')::numeric;
+  v_k := (v_payload ->> 'k')::numeric;
 
   v_r := round(255.0 * (1.0 - (v_c / 100.0)) * (1.0 - (v_k / 100.0)))::int;
   v_g := round(255.0 * (1.0 - (v_m / 100.0)) * (1.0 - (v_k / 100.0)))::int;
@@ -69,18 +70,16 @@ begin
       and a.game = 'subtra'
       and a.puzzle_date = v_today;
 
-    select won, guesses_used
-    into v_history
+    select true, won
+    into v_game_over, v_won
     from public.game_history
     where user_id = v_user_id
       and game = 'subtra'
       and puzzle_date = v_today
     limit 1;
 
-    if v_history is not null then
-      v_game_over := true;
-      v_won := v_history.won;
-    end if;
+    v_game_over := coalesce(v_game_over, false);
+    v_won := coalesce(v_won, false);
 
     select count(*)::int, count(*) filter (where won)::int
     into v_played, v_wins
@@ -88,27 +87,26 @@ begin
     where user_id = v_user_id
       and game = 'subtra';
 
-    select current_streak, best_streak
-    into v_streak
+    select coalesce(max(current_streak), 0), coalesce(max(best_streak), 0)
+    into v_current_streak, v_best_streak
     from public.streaks
     where user_id = v_user_id
-      and game = 'subtra'
-    limit 1;
+      and game = 'subtra';
   end if;
 
   return jsonb_build_object(
-    'puzzleNumber', v_puzzle.puzzle_number,
+    'puzzleNumber', v_puzzle_number,
     'targetRgb', format('rgb(%s, %s, %s)', v_r, v_g, v_b),
     'guesses', v_attempts,
     'gameOver', v_game_over,
     'won', v_won,
     'targetCmyk', case when v_game_over then jsonb_build_object('c', v_c, 'm', v_m, 'y', v_y, 'k', v_k) else null end,
-    'targetName', case when v_game_over then coalesce(v_puzzle.payload ->> 'color_name', 'SWATCH') else null end,
+    'targetName', case when v_game_over then coalesce(v_payload ->> 'color_name', 'SWATCH') else null end,
     'stats', jsonb_build_object(
       'played', v_played,
       'wins', v_wins,
-      'currentStreak', coalesce(v_streak.current_streak, 0),
-      'bestStreak', coalesce(v_streak.best_streak, 0)
+      'currentStreak', v_current_streak,
+      'bestStreak', v_best_streak
     )
   );
 end;
@@ -196,10 +194,10 @@ begin
   v_ty := (v_puzzle.payload ->> 'y')::int;
   v_tk := (v_puzzle.payload ->> 'k')::int;
 
-  v_hc := case when abs(p_c - v_tc) <= 2 then 'perfect' when v_tc > p_c then 'higher' else 'lower' end;
-  v_hm := case when abs(p_m - v_tm) <= 2 then 'perfect' when v_tm > p_m then 'higher' else 'lower' end;
-  v_hy := case when abs(p_y - v_ty) <= 2 then 'perfect' when v_ty > p_y then 'higher' else 'lower' end;
-  v_hk := case when abs(p_k - v_tk) <= 2 then 'perfect' when v_tk > p_k then 'higher' else 'lower' end;
+  v_hc := case when abs(p_c - v_tc) <= 2 then 'perfect' when abs(p_c - v_tc) <= 15 then 'close' else 'off' end;
+  v_hm := case when abs(p_m - v_tm) <= 2 then 'perfect' when abs(p_m - v_tm) <= 15 then 'close' else 'off' end;
+  v_hy := case when abs(p_y - v_ty) <= 2 then 'perfect' when abs(p_y - v_ty) <= 15 then 'close' else 'off' end;
+  v_hk := case when abs(p_k - v_tk) <= 2 then 'perfect' when abs(p_k - v_tk) <= 15 then 'close' else 'off' end;
 
   v_next_guess := v_guess_count + 1;
 

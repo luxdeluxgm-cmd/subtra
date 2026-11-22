@@ -5,7 +5,7 @@ export interface CMYK {
   k: number;
 }
 
-export type ChannelHint = 'perfect' | 'higher' | 'lower';
+export type ChannelHint = 'perfect' | 'close' | 'off';
 
 export interface GuessRow {
   guessNumber: number;
@@ -47,8 +47,10 @@ export function cmykToRgb({ c, m, y, k }: CMYK): {
 }
 
 export function evaluateChannel(guessVal: number, targetVal: number): ChannelHint {
-  if (Math.abs(guessVal - targetVal) <= 2) return 'perfect';
-  return targetVal > guessVal ? 'higher' : 'lower';
+  const diff = Math.abs(guessVal - targetVal);
+  if (diff <= 2) return 'perfect';
+  if (diff <= 15) return 'close';
+  return 'off';
 }
 
 export function getNextUtcMidnightCountdown(now: Date = new Date()): string {
