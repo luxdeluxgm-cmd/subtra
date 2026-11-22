@@ -4,36 +4,22 @@ import {
   type GuessRow,
   cmykToRgb,
   clampChannel,
-  evaluateChannel,
   getNextUtcMidnightCountdown,
 } from './cmyk';
 import {
+  type ServerPuzzleState,
   initAuth,
+  signInOrRegisterWithEmail,
   linkGoogleAccount,
+  signOutAccount,
   deleteAccountAndData,
+  formatAccountLabel,
+  fetchServerPuzzle,
+  submitServerGuess,
 } from './supabase';
 
-interface SavedState {
-  puzzleNumber: number;
-  guesses: GuessRow[];
-  currentGuess: CMYK;
-}
-
-interface SavedStats {
-  played: number;
-  wins: number;
-  currentStreak: number;
-  bestStreak: number;
-  lastCompletedPuzzle: number | null;
-}
-
-const TARGET_CMYK: CMYK = { c: 15, m: 65, y: 45, k: 5 };
-const TARGET_NAME = 'TERRACOTTA';
-const PUZZLE_NUMBER = 1;
-
 const THEME_KEY = 'subtra_theme';
-const STATE_KEY = 'subtra_state';
-const STATS_KEY = 'subtra_stats';
+const DRAFT_KEY = 'subtra_draft_guess';
 
 function loadTheme(): boolean {
   const saved = localStorage.getItem(THEME_KEY);
@@ -42,78 +28,62 @@ function loadTheme(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
-function loadState(): SavedState {
+function loadDraftGuess(): CMYK {
   try {
-    const raw = localStorage.getItem(STATE_KEY);
+    const raw = localStorage.getItem(DRAFT_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as SavedState;
-      if (parsed.puzzleNumber === PUZZLE_NUMBER && Array.isArray(parsed.guesses)) {
-        return parsed;
-      }
+      return JSON.parse(raw) as CMYK;
     }
   } catch {}
-  return {
-    puzzleNumber: PUZZLE_NUMBER,
-    guesses: [],
-    currentGuess: { c: 30, m: 30, y: 30, k: 0 },
-  };
+  return { c: 30, m: 30, y: 30, k: 0 };
 }
 
-function loadStats(): SavedStats {
-  try {
-    const raw = localStorage.getItem(STATS_KEY);
-    if (raw) {
-      return JSON.parse(raw) as SavedStats;
-    }
-  } catch {}
-  return {
-    played: 0,
-    wins: 0,
-    currentStreak: 0,
-    bestStreak: 0,
-    lastCompletedPuzzle: null,
-  };
-}
-
-const initialState = loadState();
-let currentGuess: CMYK = { ...initialState.currentGuess };
-let guesses: GuessRow[] = [...initialState.guesses];
-let stats: SavedStats = loadStats();
+let currentGuess: CMYK = loadDraftGuess();
+let puzzleNumber = 1;
+let targetRgb = 'rgb(200, 196, 188)';
+let targetCmyk: CMYK | null = null;
+let targetName: string | null = null;
+let guesses: GuessRow[] = [];
+let gameOver = false;
+let won = false;
+let stats = { played: 0, wins: 0, currentStreak: 0, bestStreak: 0 };
+let submitting = false;
 let darkMode = loadTheme();
 let burgerOpen = false;
 let confirmDeleteArmed = false;
 
-function saveState() {
-  const payload: SavedState = {
-    puzzleNumber: PUZZLE_NUMBER,
-    guesses,
-    currentGuess,
-  };
-  localStorage.setItem(STATE_KEY, JSON.stringify(payload));
+function saveDraftGuess() {
+  localStorage.setItem(DRAFT_KEY, JSON.stringify(currentGuess));
 }
 
-function saveStats() {
-  localStorage.setItem(STATS_KEY, JSON.stringify(stats));
-}
-
+const puzzleNumberBadge = document.getElementById('puzzle-number-badge')!;
 const targetSwatchBox = document.getElementById('target-swatch-box')!;
 const targetTitleLabel = document.getElementById('target-title-label')!;
 const targetSpecLabel = document.getElementById('target-spec-label')!;
 const tryCounterLabel = document.getElementById('try-counter-label')!;
 const guessForm = document.getElementById('guess-form') as HTMLFormElement;
+const submitBtn = document.getElementById('btn-submit-guess') as HTMLButtonElement;
 const gameoverBanner = document.getElementById('gameover-banner')!;
 const gameoverTitle = document.getElementById('gameover-title')!;
 const gameoverSubtitle = document.getElementById('gameover-subtitle')!;
+const resetDemoBtn = document.getElementById('btn-reset-demo')!;
 const guessSlotsContainer = document.getElementById('guess-slots-container')!;
 const shareTextPreview = document.getElementById('share-text-preview')!;
 const utcCountdown = document.getElementById('utc-countdown')!;
 const accountStatusBox = document.getElementById('account-status-box')!;
 const accountFeedback = document.getElementById('account-feedback')!;
+const emailAuthForm = document.getElementById('email-auth-form') as HTMLFormElement;
+const authEmailInput = document.getElementById('auth-email') as HTMLInputElement;
+const authPasswordInput = document.getElementById('auth-password') as HTMLInputElement;
+const googleBtn = document.getElementById('btn-link-google')!;
+const signOutBtn = document.getElementById('btn-sign-out')!;
 const deleteAccountBtn = document.getElementById('btn-delete-account')!;
 const burgerBtn = document.getElementById('btn-burger')!;
 const burgerMenu = document.getElementById('burger-menu')!;
 const themeLabel = document.getElementById('theme-label')!;
 const themeDesktopLabel = document.getElementById('theme-desktop-label')!;
+
+resetDemoBtn.classList.add('hidden');
 
 const inputs: Record<keyof CMYK, HTMLInputElement> = {
   c: document.getElementById('input-c') as HTMLInputElement,
@@ -125,6 +95,25 @@ const inputs: Record<keyof CMYK, HTMLInputElement> = {
 (['c', 'm', 'y', 'k'] as const).forEach((ch) => {
   inputs[ch].value = String(currentGuess[ch]);
 });
+
+function applyServerState(state: ServerPuzzleState) {
+  puzzleNumber = state.puzzleNumber;
+  targetRgb = state.targetRgb;
+  guesses = state.guesses ?? [];
+  gameOver = state.gameOver;
+  won = state.won;
+  targetCmyk = state.targetCmyk;
+  targetName = state.targetName;
+  stats = state.stats ?? { played: 0, wins: 0, currentStreak: 0, bestStreak: 0 };
+  render();
+}
+
+async function syncFromServer() {
+  const state = await fetchServerPuzzle();
+  if (state) {
+    applyServerState(state);
+  }
+}
 
 function setBurgerOpen(next: boolean) {
   burgerOpen = next;
@@ -138,21 +127,6 @@ function applyTheme() {
   localStorage.setItem(THEME_KEY, darkMode ? 'dark' : 'light');
   themeLabel.textContent = darkMode ? 'Light Mode' : 'Dark Mode';
   themeDesktopLabel.textContent = darkMode ? 'Light' : 'Dark';
-}
-
-function isWon(): boolean {
-  const last = guesses[guesses.length - 1];
-  return Boolean(
-    last &&
-      last.hints.c === 'perfect' &&
-      last.hints.m === 'perfect' &&
-      last.hints.y === 'perfect' &&
-      last.hints.k === 'perfect'
-  );
-}
-
-function isGameOver(): boolean {
-  return isWon() || guesses.length >= 5;
 }
 
 function renderHintCell(label: string, hint: ChannelHint, value: number): string {
@@ -172,9 +146,7 @@ function renderHintCell(label: string, hint: ChannelHint, value: number): string
 }
 
 function buildShareText(): string {
-  const won = isWon();
-  const over = isGameOver();
-  const score = over ? (won ? `${guesses.length}/5` : 'X/5') : `${guesses.length}/5`;
+  const score = gameOver ? (won ? `${guesses.length}/5` : 'X/5') : `${guesses.length}/5`;
   const grid =
     guesses.length > 0
       ? guesses
@@ -191,30 +163,32 @@ function buildShareText(): string {
           )
           .join('\n')
       : '🟩🔼🔽🟩';
-  return `Subtra #${PUZZLE_NUMBER} ${score}\n${grid}`;
+  return `Subtra #${puzzleNumber} ${score}\n${grid}`;
 }
 
 function render() {
-  const targetRgb = cmykToRgb(TARGET_CMYK);
-  const won = isWon();
-  const over = isGameOver();
+  const numStr = String(puzzleNumber).padStart(3, '0');
+  puzzleNumberBadge.textContent = `#${numStr}`;
+  targetSwatchBox.style.backgroundColor = targetRgb;
 
-  targetSwatchBox.style.backgroundColor = targetRgb.css;
-
-  targetTitleLabel.textContent = over ? TARGET_NAME : `SWATCH 00${PUZZLE_NUMBER}`;
-  targetSpecLabel.textContent = over
-    ? `C${TARGET_CMYK.c}  M${TARGET_CMYK.m}  Y${TARGET_CMYK.y}  K${TARGET_CMYK.k}`
-    : 'C —  M —  Y —  K —';
+  targetTitleLabel.textContent = gameOver && targetName ? targetName : `SWATCH ${numStr}`;
+  targetSpecLabel.textContent =
+    gameOver && targetCmyk
+      ? `C${targetCmyk.c}  M${targetCmyk.m}  Y${targetCmyk.y}  K${targetCmyk.k}`
+      : 'C —  M —  Y —  K —';
 
   tryCounterLabel.textContent = `${guesses.length} / 5`;
 
-  guessForm.classList.toggle('hidden', over);
-  gameoverBanner.classList.toggle('hidden', !over);
-  gameoverBanner.classList.toggle('flex', over);
+  guessForm.classList.toggle('hidden', gameOver);
+  gameoverBanner.classList.toggle('hidden', !gameOver);
+  gameoverBanner.classList.toggle('flex', gameOver);
 
-  if (over) {
+  if (gameOver) {
     gameoverTitle.textContent = won ? 'SOLVED' : 'GAME OVER';
-    gameoverSubtitle.textContent = `${TARGET_NAME} • C${TARGET_CMYK.c} M${TARGET_CMYK.m} Y${TARGET_CMYK.y} K${TARGET_CMYK.k}`;
+    gameoverSubtitle.textContent =
+      targetName && targetCmyk
+        ? `${targetName} • C${targetCmyk.c} M${targetCmyk.m} Y${targetCmyk.y} K${targetCmyk.k}`
+        : '';
   }
 
   const rowsHtml: string[] = [];
@@ -284,7 +258,7 @@ burgerBtn.addEventListener('click', () => {
   inputs[ch].addEventListener('input', () => {
     const parsed = parseInt(inputs[ch].value, 10);
     currentGuess[ch] = Number.isNaN(parsed) ? 0 : clampChannel(parsed);
-    saveState();
+    saveDraftGuess();
   });
 });
 
@@ -294,59 +268,33 @@ document.querySelectorAll<HTMLButtonElement>('[data-channel]').forEach((btn) => 
     const delta = parseInt(btn.dataset.delta || '0', 10);
     currentGuess[ch] = clampChannel(currentGuess[ch] + delta);
     inputs[ch].value = String(currentGuess[ch]);
-    saveState();
+    saveDraftGuess();
   });
 });
 
-guessForm.addEventListener('submit', (e) => {
+guessForm.addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (isGameOver()) return;
+  if (gameOver || submitting) return;
 
-  guesses.push({
-    guessNumber: guesses.length + 1,
-    cmyk: { ...currentGuess },
-    hints: {
-      c: evaluateChannel(currentGuess.c, TARGET_CMYK.c),
-      m: evaluateChannel(currentGuess.m, TARGET_CMYK.m),
-      y: evaluateChannel(currentGuess.y, TARGET_CMYK.y),
-      k: evaluateChannel(currentGuess.k, TARGET_CMYK.k),
-    },
-  });
+  submitting = true;
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'CHECKING...';
 
-  saveState();
+  const { state, error } = await submitServerGuess(currentGuess);
 
-  if (isGameOver() && stats.lastCompletedPuzzle !== PUZZLE_NUMBER) {
-    const won = isWon();
-    stats.played += 1;
-    if (won) {
-      stats.wins += 1;
-      stats.currentStreak += 1;
-      stats.bestStreak = Math.max(stats.bestStreak, stats.currentStreak);
-    } else {
-      stats.currentStreak = 0;
-    }
-    stats.lastCompletedPuzzle = PUZZLE_NUMBER;
-    saveStats();
+  submitting = false;
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'GUESS';
+
+  if (error || !state) {
+    return;
   }
 
-  render();
-  if (isGameOver()) {
+  applyServerState(state);
+
+  if (state.gameOver) {
     setTimeout(() => openModal('modal-results'), 350);
   }
-});
-
-document.getElementById('btn-reset-demo')!.addEventListener('click', () => {
-  guesses = [];
-  currentGuess = { c: 30, m: 30, y: 30, k: 0 };
-  (['c', 'm', 'y', 'k'] as const).forEach((ch) => {
-    inputs[ch].value = String(currentGuess[ch]);
-  });
-  if (stats.lastCompletedPuzzle === PUZZLE_NUMBER) {
-    stats.lastCompletedPuzzle = null;
-    saveStats();
-  }
-  saveState();
-  render();
 });
 
 document.querySelectorAll<HTMLButtonElement>('[data-toggle-theme]').forEach((btn) => {
@@ -375,12 +323,43 @@ document.getElementById('btn-copy-share')!.addEventListener('click', async (e) =
   }, 2000);
 });
 
-document.getElementById('btn-link-google')!.addEventListener('click', async () => {
+emailAuthForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  accountFeedback.classList.add('hidden');
+  const { error, message } = await signInOrRegisterWithEmail(
+    authEmailInput.value,
+    authPasswordInput.value
+  );
+  if (error) {
+    accountFeedback.textContent = error;
+    accountFeedback.classList.remove('hidden');
+    return;
+  }
+  authPasswordInput.value = '';
+  accountFeedback.textContent = message;
+  accountFeedback.classList.remove('hidden');
+  await syncFromServer();
+});
+
+googleBtn.addEventListener('click', async () => {
   const err = await linkGoogleAccount();
   if (err) {
     accountFeedback.textContent = err;
     accountFeedback.classList.remove('hidden');
   }
+});
+
+signOutBtn.addEventListener('click', async () => {
+  await signOutAccount();
+  guesses = [];
+  gameOver = false;
+  won = false;
+  targetCmyk = null;
+  targetName = null;
+  stats = { played: 0, wins: 0, currentStreak: 0, bestStreak: 0 };
+  accountFeedback.textContent = 'Signed out.';
+  accountFeedback.classList.remove('hidden');
+  await syncFromServer();
 });
 
 deleteAccountBtn.addEventListener('click', async () => {
@@ -398,33 +377,35 @@ deleteAccountBtn.addEventListener('click', async () => {
   }
   guesses = [];
   currentGuess = { c: 30, m: 30, y: 30, k: 0 };
-  stats = {
-    played: 0,
-    wins: 0,
-    currentStreak: 0,
-    bestStreak: 0,
-    lastCompletedPuzzle: null,
-  };
+  gameOver = false;
+  won = false;
+  targetCmyk = null;
+  targetName = null;
+  stats = { played: 0, wins: 0, currentStreak: 0, bestStreak: 0 };
   (['c', 'm', 'y', 'k'] as const).forEach((ch) => {
     inputs[ch].value = String(currentGuess[ch]);
   });
   resetDeleteConfirmation();
-  render();
+  await syncFromServer();
   accountFeedback.textContent = 'All account and local data erased.';
   accountFeedback.classList.remove('hidden');
 });
 
-initAuth((user) => {
-  if (!user) {
-    accountStatusBox.innerHTML = `<p class="font-mono-spec font-bold">LOCAL SESSION</p><p class="text-muted">Progress is stored on this device. Sign in with Google once connected to sync across devices.</p>`;
-    return;
-  }
-  const isAnon = Boolean(user.is_anonymous ?? true);
-  accountStatusBox.innerHTML = `<p class="font-mono-spec font-bold">${
-    isAnon ? 'GUEST SESSION' : user.email ?? 'GOOGLE ACCOUNT'
-  }</p><p class="text-muted">${
-    isAnon ? 'Sign in with Google to keep your streak across devices.' : 'Your stats and streak are synced.'
+initAuth(async (user) => {
+  const isPermanent = Boolean(user && !user.is_anonymous);
+  const label = formatAccountLabel(user);
+
+  emailAuthForm.classList.toggle('hidden', isPermanent);
+  googleBtn.classList.toggle('hidden', isPermanent);
+  signOutBtn.classList.toggle('hidden', !isPermanent);
+
+  accountStatusBox.innerHTML = `<p class="font-mono-spec font-bold">${label}</p><p class="text-muted">${
+    isPermanent
+      ? 'This account works across both Subtra and Idiomatic.'
+      : 'Sign in with email or Google to sync your streak across devices and games.'
   }</p>`;
+
+  await syncFromServer();
 });
 
 setInterval(() => {
@@ -434,3 +415,4 @@ utcCountdown.textContent = getNextUtcMidnightCountdown();
 
 applyTheme();
 render();
+syncFromServer();
