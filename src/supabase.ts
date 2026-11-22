@@ -127,6 +127,9 @@ export async function signInOrRegisterWithEmail(
   });
 
   if (signUpError) {
+    if (signUpError.message.toLowerCase().includes('already registered')) {
+      return { error: 'Invalid email or password.', message: '' };
+    }
     return { error: formatAuthError(signUpError.message), message: '' };
   }
 

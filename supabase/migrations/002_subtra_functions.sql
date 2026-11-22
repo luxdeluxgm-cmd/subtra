@@ -154,6 +154,8 @@ begin
   values (v_user_id, 'Guest', true)
   on conflict (id) do nothing;
 
+  perform 1 from public.profiles where id = v_user_id for update;
+
   if exists (
     select 1 from public.game_history
     where user_id = v_user_id and game = 'subtra' and puzzle_date = v_today
