@@ -72,6 +72,9 @@ const shareTextPreview = document.getElementById('share-text-preview')!;
 const utcCountdown = document.getElementById('utc-countdown')!;
 const accountStatusBox = document.getElementById('account-status-box')!;
 const accountFeedback = document.getElementById('account-feedback')!;
+const guestAuthWrapper = document.getElementById('guest-auth-wrapper')!;
+const toggleLoginBtn = document.getElementById('btn-toggle-login')!;
+const loginDrawer = document.getElementById('login-drawer')!;
 const emailAuthForm = document.getElementById('email-auth-form') as HTMLFormElement;
 const authEmailInput = document.getElementById('auth-email') as HTMLInputElement;
 const authPasswordInput = document.getElementById('auth-password') as HTMLInputElement;
@@ -242,6 +245,7 @@ function resetDeleteConfirmation() {
 function openModal(id: string) {
   setBurgerOpen(false);
   resetDeleteConfirmation();
+  loginDrawer.classList.remove('is-open');
   accountFeedback.classList.add('hidden');
   const el = document.getElementById(id);
   if (!el) return;
@@ -329,6 +333,10 @@ document.getElementById('btn-copy-share')!.addEventListener('click', async (e) =
   }, 2000);
 });
 
+toggleLoginBtn.addEventListener('click', () => {
+  loginDrawer.classList.toggle('is-open');
+});
+
 emailAuthForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   accountFeedback.classList.add('hidden');
@@ -401,8 +409,7 @@ initAuth(async (user) => {
   const isPermanent = Boolean(user && !user.is_anonymous);
   const label = formatAccountLabel(user);
 
-  emailAuthForm.classList.toggle('hidden', isPermanent);
-  googleBtn.classList.toggle('hidden', isPermanent);
+  guestAuthWrapper.classList.toggle('hidden', isPermanent);
   signOutBtn.classList.toggle('hidden', !isPermanent);
 
   const titleEl = document.createElement('p');

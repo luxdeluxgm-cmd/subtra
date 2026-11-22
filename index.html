@@ -259,33 +259,46 @@
         </div>
         <div id="account-status-box" class="border border-ink p-3 text-xs space-y-1 bg-paper"></div>
 
-        <form id="email-auth-form" class="space-y-2">
-          <input
-            id="auth-email"
-            type="email"
-            autocomplete="email"
-            required
-            placeholder="Email address"
-            class="w-full px-3 py-2 border border-ink bg-paper font-mono-spec text-xs focus:outline-none"
-          />
-          <input
-            id="auth-password"
-            type="password"
-            autocomplete="current-password"
-            required
-            minlength="6"
-            placeholder="Password (min. 6 chars)"
-            class="w-full px-3 py-2 border border-ink bg-paper font-mono-spec text-xs focus:outline-none"
-          />
-          <button type="submit" class="w-full py-2.5 px-4 font-mono-spec font-bold text-xs uppercase bg-ink text-paper cursor-pointer">
-            Sign In / Create Account
+        <div id="guest-auth-wrapper" class="space-y-2">
+          <button id="btn-toggle-login" type="button" class="w-full py-2.5 px-4 font-mono-spec font-bold text-xs uppercase bg-ink text-paper cursor-pointer">
+            Create / Login
           </button>
-        </form>
+
+          <div id="login-drawer" class="burger-menu-panel">
+            <div class="burger-menu-inner">
+              <div class="pt-2 space-y-2">
+                <form id="email-auth-form" class="space-y-2">
+                  <input
+                    id="auth-email"
+                    type="email"
+                    autocomplete="email"
+                    required
+                    placeholder="Email address"
+                    class="w-full px-3 py-2 border border-ink bg-paper font-mono-spec text-xs focus:outline-none"
+                  />
+                  <input
+                    id="auth-password"
+                    type="password"
+                    autocomplete="current-password"
+                    required
+                    minlength="6"
+                    placeholder="Password (min. 6 chars)"
+                    class="w-full px-3 py-2 border border-ink bg-paper font-mono-spec text-xs focus:outline-none"
+                  />
+                  <button type="submit" class="w-full py-2 px-4 font-mono-spec font-bold text-xs uppercase border border-ink bg-ink text-paper cursor-pointer">
+                    Continue with Email
+                  </button>
+                </form>
+
+                <button id="btn-link-google" type="button" class="w-full py-2 px-4 font-mono-spec font-bold text-xs uppercase border border-ink hover:bg-ink hover:text-paper transition-colors cursor-pointer">
+                  Continue with Google
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div id="account-actions" class="space-y-2 pt-1 border-t border-ink/20">
-          <button id="btn-link-google" type="button" class="w-full py-2 px-4 font-mono-spec font-bold text-xs uppercase border border-ink hover:bg-ink hover:text-paper transition-colors cursor-pointer">
-            Continue with Google
-          </button>
           <button id="btn-sign-out" type="button" class="hidden w-full py-2 px-4 font-mono-spec font-bold text-xs uppercase border border-ink hover:bg-ink hover:text-paper transition-colors cursor-pointer">
             Sign Out
           </button>
