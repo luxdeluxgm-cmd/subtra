@@ -218,7 +218,7 @@ function render() {
         </div>
       </div>`);
     } else {
-      rowsHtml.push(`<div class="grid grid-cols-4 divide-x divide-ink/15 h-11 md:h-12 text-muted/45 font-mono-spec text-[11px]">
+      rowsHtml.push(`<div class="grid grid-cols-4 divide-x divide-ink/15 h-11 md:h-12 text-muted font-mono-spec text-[11px]">
         <div class="px-2.5 flex items-center">0${slot}</div>
         <div></div>
         <div></div>
@@ -405,7 +405,7 @@ deleteAccountBtn.addEventListener('click', async () => {
   accountFeedback.classList.remove('hidden');
 });
 
-initAuth(async (user) => {
+initAuth(async (user, isInitial) => {
   const isPermanent = Boolean(user && !user.is_anonymous);
   const label = formatAccountLabel(user);
 
@@ -424,7 +424,9 @@ initAuth(async (user) => {
 
   accountStatusBox.replaceChildren(titleEl, descEl);
 
-  await syncFromServer();
+  if (!isInitial) {
+    await syncFromServer();
+  }
 });
 
 setInterval(() => {

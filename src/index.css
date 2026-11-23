@@ -7,7 +7,7 @@
   --paper: #F4F1EA;
   --card: #FFFFFF;
   --ink: #141413;
-  --muted: #6B6860;
+  --muted: #59564F;
   font-family: 'Plus Jakarta Sans Variable', system-ui, -apple-system, sans-serif;
 }
 
@@ -15,7 +15,7 @@
   --paper: #111110;
   --card: #181817;
   --ink: #F0EDE6;
-  --muted: #9E9A90;
+  --muted: #A8A49A;
 }
 
 @theme inline {

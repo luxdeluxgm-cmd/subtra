@@ -43,17 +43,19 @@ export function formatAccountLabel(user: User | null): string {
   return user.email ?? 'SIGNED IN';
 }
 
-export async function initAuth(onUserChange: (user: User | null) => void): Promise<void> {
+export async function initAuth(
+  onUserChange: (user: User | null, isInitial: boolean) => void
+): Promise<void> {
   if (!supabase) {
-    onUserChange(null);
+    onUserChange(null, true);
     return;
   }
 
-  const { data: sessionData } = await supabase.auth.getSession();
-  onUserChange(sessionData.session?.user ?? null);
-
-  supabase.auth.onAuthStateChange((_event, session) => {
-    onUserChange(session?.user ?? null);
+  let initialHandled = false;
+  supabase.auth.onAuthStateChange((event, session) => {
+    const isInitial = !initialHandled && event === 'INITIAL_SESSION';
+    initialHandled = true;
+    onUserChange(session?.user ?? null, isInitial);
   });
 }
 
