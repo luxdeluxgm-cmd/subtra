@@ -1,49 +1,251 @@
-import {
-  type CMYK,
-  type ChannelHint,
-  type GuessRow,
-  cmykToRgb,
-  clampChannel,
-  getNextUtcMidnightCountdown,
-} from './cmyk';
-import {
-  type ServerPuzzleState,
-  initAuth,
-  signInOrRegisterWithEmail,
-  linkGoogleAccount,
-  signOutAccount,
-  deleteAccountAndData,
-  formatAccountLabel,
-  fetchServerPuzzle,
-  submitServerGuess,
-} from './supabase';
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey =
+  import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_KEY;
+
+const isSupabaseConfigured = Boolean(
+  supabaseUrl &&
+    supabaseAnonKey &&
+    supabaseUrl.startsWith('http') &&
+    supabaseAnonKey.length > 20
+);
+
+const supabase = isSupabaseConfigured
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    })
+  : null;
+
+function clampChannel(val) {
+  if (Number.isNaN(val)) return 0;
+  return Math.min(100, Math.max(0, Math.round(val)));
+}
+
+function cmykToRgb({ c, m, y, k }) {
+  const cNorm = clampChannel(c) / 100;
+  const mNorm = clampChannel(m) / 100;
+  const yNorm = clampChannel(y) / 100;
+  const kNorm = clampChannel(k) / 100;
+
+  const r = Math.round(255 * (1 - cNorm) * (1 - kNorm));
+  const g = Math.round(255 * (1 - mNorm) * (1 - kNorm));
+  const b = Math.round(255 * (1 - yNorm) * (1 - kNorm));
+
+  return {
+    r,
+    g,
+    b,
+    css: `rgb(${r}, ${g}, ${b})`,
+  };
+}
+
+function getNextUtcMidnightCountdown(now = new Date()) {
+  const nextMidnight = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() + 1,
+    0,
+    0,
+    0
+  );
+  const diffSeconds = Math.max(0, Math.floor((nextMidnight - now.getTime()) / 1000));
+  const hours = Math.floor(diffSeconds / 3600);
+  const minutes = Math.floor((diffSeconds % 3600) / 60);
+  const seconds = diffSeconds % 60;
+
+  return [hours, minutes, seconds].map((v) => String(v).padStart(2, '0')).join(':');
+}
+
+function formatAccountLabel(user) {
+  if (!user || user.is_anonymous) return 'GUEST SESSION';
+  return user.email ?? 'SIGNED IN';
+}
+
+function initAuth(onUserChange) {
+  if (!supabase) {
+    onUserChange(null, true);
+    return;
+  }
+
+  let initialHandled = false;
+  supabase.auth.onAuthStateChange((event, session) => {
+    const isInitial = !initialHandled && event === 'INITIAL_SESSION';
+    initialHandled = true;
+    onUserChange(session?.user ?? null, isInitial);
+  });
+}
+
+async function ensureAuthenticatedUser() {
+  if (!supabase) return null;
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (sessionData.session?.user) {
+    return sessionData.session.user;
+  }
+  const { data: anonData } = await supabase.auth.signInAnonymously();
+  return anonData.user ?? null;
+}
+
+async function signInOrRegisterWithEmail(email, password) {
+  if (!supabase) return { error: 'Database is not connected yet.', message: '' };
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail.includes('@')) {
+    return { error: 'Enter a valid email address.', message: '' };
+  }
+  if (
+    password.length < 6 ||
+    !/[a-z]/.test(password) ||
+    !/[A-Z]/.test(password) ||
+    !/[0-9]/.test(password)
+  ) {
+    return {
+      error: 'Password must be at least 6 characters with uppercase, lowercase, and a number.',
+      message: '',
+    };
+  }
+
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: cleanEmail,
+    password,
+  });
+
+  if (!signInError) {
+    return { error: null, message: 'Signed in.' };
+  }
+
+  const formatAuthError = (msg) => {
+    if (msg.includes('Password should contain')) {
+      return 'Password must be at least 6 characters with uppercase, lowercase, and a number.';
+    }
+    return msg;
+  };
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (sessionData.session?.user?.is_anonymous) {
+    const { error: upgradeError } = await supabase.auth.updateUser({
+      email: cleanEmail,
+      password,
+    });
+    if (!upgradeError) {
+      return { error: null, message: 'Account saved.' };
+    }
+    if (upgradeError.message.includes('Password should contain')) {
+      return { error: formatAuthError(upgradeError.message), message: '' };
+    }
+  }
+
+  const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+    email: cleanEmail,
+    password,
+  });
+
+  if (signUpError) {
+    if (signUpError.message.toLowerCase().includes('already registered')) {
+      return { error: 'Invalid email or password.', message: '' };
+    }
+    return { error: formatAuthError(signUpError.message), message: '' };
+  }
+
+  if (signUpData.user && !signUpData.session) {
+    return {
+      error: null,
+      message: 'Check your email inbox to confirm your account.',
+    };
+  }
+
+  return { error: null, message: 'Account created and signed in.' };
+}
+
+async function linkGoogleAccount() {
+  if (!supabase) return 'Database is not connected yet.';
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (sessionData.session?.user?.is_anonymous) {
+    const { error } = await supabase.auth.linkIdentity({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    });
+    return error ? error.message : null;
+  }
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.origin },
+  });
+  return error ? error.message : null;
+}
+
+async function signOutAccount() {
+  if (!supabase) return;
+  await supabase.auth.signOut();
+}
+
+async function deleteAccountAndData() {
+  if (supabase) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData.session?.user) {
+      const { error } = await supabase.rpc('delete_own_account');
+      if (error) return error.message;
+      await supabase.auth.signOut();
+    }
+  }
+  localStorage.removeItem('subtra_state');
+  localStorage.removeItem('subtra_stats');
+  localStorage.removeItem('subtra_theme');
+  localStorage.removeItem('subtra_draft_guess');
+  return null;
+}
+
+async function fetchServerPuzzle() {
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc('get_subtra_puzzle');
+  if (error || !data) return null;
+  return data;
+}
+
+async function submitServerGuess(cmyk) {
+  if (!supabase) return { state: null, error: 'Database not connected.' };
+  await ensureAuthenticatedUser();
+  const { data, error } = await supabase.rpc('submit_subtra_guess', {
+    p_c: cmyk.c,
+    p_m: cmyk.m,
+    p_y: cmyk.y,
+    p_k: cmyk.k,
+  });
+  if (error) {
+    return { state: null, error: error.message };
+  }
+  return { state: data, error: null };
+}
 
 const THEME_KEY = 'subtra_theme';
 const DRAFT_KEY = 'subtra_draft_guess';
 
-function loadTheme(): boolean {
+function loadTheme() {
   const saved = localStorage.getItem(THEME_KEY);
   if (saved === 'dark') return true;
   if (saved === 'light') return false;
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
-function loadDraftGuess(): CMYK {
+function loadDraftGuess() {
   try {
     const raw = localStorage.getItem(DRAFT_KEY);
     if (raw) {
-      return JSON.parse(raw) as CMYK;
+      return JSON.parse(raw);
     }
   } catch {}
   return { c: 30, m: 30, y: 30, k: 0 };
 }
 
-let currentGuess: CMYK = loadDraftGuess();
+let currentGuess = loadDraftGuess();
 let puzzleNumber = 1;
 let targetRgb = 'rgb(200, 196, 188)';
-let targetCmyk: CMYK | null = null;
-let targetName: string | null = null;
-let guesses: GuessRow[] = [];
+let targetCmyk = null;
+let targetName = null;
+let guesses = [];
 let gameOver = false;
 let won = false;
 let stats = { played: 0, wins: 0, currentStreak: 0, bestStreak: 0 };
@@ -56,50 +258,50 @@ function saveDraftGuess() {
   localStorage.setItem(DRAFT_KEY, JSON.stringify(currentGuess));
 }
 
-const puzzleNumberBadge = document.getElementById('puzzle-number-badge')!;
-const targetSwatchBox = document.getElementById('target-swatch-box')!;
-const targetTitleLabel = document.getElementById('target-title-label')!;
-const targetSpecLabel = document.getElementById('target-spec-label')!;
-const tryCounterLabel = document.getElementById('try-counter-label')!;
-const guessForm = document.getElementById('guess-form') as HTMLFormElement;
-const submitBtn = document.getElementById('btn-submit-guess') as HTMLButtonElement;
-const gameoverBanner = document.getElementById('gameover-banner')!;
-const gameoverTitle = document.getElementById('gameover-title')!;
-const gameoverSubtitle = document.getElementById('gameover-subtitle')!;
-const resetDemoBtn = document.getElementById('btn-reset-demo')!;
-const guessSlotsContainer = document.getElementById('guess-slots-container')!;
-const shareTextPreview = document.getElementById('share-text-preview')!;
-const utcCountdown = document.getElementById('utc-countdown')!;
-const accountStatusBox = document.getElementById('account-status-box')!;
-const accountFeedback = document.getElementById('account-feedback')!;
-const guestAuthWrapper = document.getElementById('guest-auth-wrapper')!;
-const toggleLoginBtn = document.getElementById('btn-toggle-login')!;
-const loginDrawer = document.getElementById('login-drawer')!;
-const emailAuthForm = document.getElementById('email-auth-form') as HTMLFormElement;
-const authEmailInput = document.getElementById('auth-email') as HTMLInputElement;
-const authPasswordInput = document.getElementById('auth-password') as HTMLInputElement;
-const googleBtn = document.getElementById('btn-link-google')!;
-const signOutBtn = document.getElementById('btn-sign-out')!;
-const deleteAccountBtn = document.getElementById('btn-delete-account')!;
-const burgerBtn = document.getElementById('btn-burger')!;
-const burgerMenu = document.getElementById('burger-menu')!;
-const themeLabel = document.getElementById('theme-label')!;
-const themeDesktopLabel = document.getElementById('theme-desktop-label')!;
+const puzzleNumberBadge = document.getElementById('puzzle-number-badge');
+const targetSwatchBox = document.getElementById('target-swatch-box');
+const targetTitleLabel = document.getElementById('target-title-label');
+const targetSpecLabel = document.getElementById('target-spec-label');
+const tryCounterLabel = document.getElementById('try-counter-label');
+const guessForm = document.getElementById('guess-form');
+const submitBtn = document.getElementById('btn-submit-guess');
+const gameoverBanner = document.getElementById('gameover-banner');
+const gameoverTitle = document.getElementById('gameover-title');
+const gameoverSubtitle = document.getElementById('gameover-subtitle');
+const resetDemoBtn = document.getElementById('btn-reset-demo');
+const guessSlotsContainer = document.getElementById('guess-slots-container');
+const shareTextPreview = document.getElementById('share-text-preview');
+const utcCountdown = document.getElementById('utc-countdown');
+const accountStatusBox = document.getElementById('account-status-box');
+const accountFeedback = document.getElementById('account-feedback');
+const guestAuthWrapper = document.getElementById('guest-auth-wrapper');
+const toggleLoginBtn = document.getElementById('btn-toggle-login');
+const loginDrawer = document.getElementById('login-drawer');
+const emailAuthForm = document.getElementById('email-auth-form');
+const authEmailInput = document.getElementById('auth-email');
+const authPasswordInput = document.getElementById('auth-password');
+const googleBtn = document.getElementById('btn-link-google');
+const signOutBtn = document.getElementById('btn-sign-out');
+const deleteAccountBtn = document.getElementById('btn-delete-account');
+const burgerBtn = document.getElementById('btn-burger');
+const burgerMenu = document.getElementById('burger-menu');
+const themeLabel = document.getElementById('theme-label');
+const themeDesktopLabel = document.getElementById('theme-desktop-label');
 
 resetDemoBtn.classList.add('hidden');
 
-const inputs: Record<keyof CMYK, HTMLInputElement> = {
-  c: document.getElementById('input-c') as HTMLInputElement,
-  m: document.getElementById('input-m') as HTMLInputElement,
-  y: document.getElementById('input-y') as HTMLInputElement,
-  k: document.getElementById('input-k') as HTMLInputElement,
+const inputs = {
+  c: document.getElementById('input-c'),
+  m: document.getElementById('input-m'),
+  y: document.getElementById('input-y'),
+  k: document.getElementById('input-k'),
 };
 
-(['c', 'm', 'y', 'k'] as const).forEach((ch) => {
+['c', 'm', 'y', 'k'].forEach((ch) => {
   inputs[ch].value = String(currentGuess[ch]);
 });
 
-function applyServerState(state: ServerPuzzleState) {
+function applyServerState(state) {
   puzzleNumber = state.puzzleNumber;
   targetRgb = state.targetRgb;
   guesses = state.guesses ?? [];
@@ -118,7 +320,7 @@ async function syncFromServer() {
   }
 }
 
-function setBurgerOpen(next: boolean) {
+function setBurgerOpen(next) {
   burgerOpen = next;
   burgerBtn.classList.toggle('is-open', burgerOpen);
   burgerBtn.setAttribute('aria-expanded', String(burgerOpen));
@@ -132,7 +334,7 @@ function applyTheme() {
   themeDesktopLabel.textContent = darkMode ? 'Light' : 'Dark';
 }
 
-function renderHintCell(label: string, hint: ChannelHint, value: number): string {
+function renderHintCell(label, hint, value) {
   if (hint === 'perfect') {
     return `<div class="py-2 px-1.5 md:px-2.5 flex items-center justify-between bg-ink text-paper font-mono-spec text-xs font-bold">
       <span class="opacity-65 text-[10px]">${label}</span>
@@ -154,13 +356,13 @@ function renderHintCell(label: string, hint: ChannelHint, value: number): string
   </div>`;
 }
 
-function buildShareText(): string {
+function buildShareText() {
   const score = gameOver ? (won ? `${guesses.length}/5` : 'X/5') : `${guesses.length}/5`;
   const grid =
     guesses.length > 0
       ? guesses
           .map((r) =>
-            (['c', 'm', 'y', 'k'] as const)
+            ['c', 'm', 'y', 'k']
               .map((ch) =>
                 r.hints[ch] === 'perfect'
                   ? '🟩'
@@ -200,7 +402,7 @@ function render() {
         : '';
   }
 
-  const rowsHtml: string[] = [];
+  const rowsHtml = [];
 
   for (let slot = 1; slot <= 5; slot++) {
     const row = guesses[slot - 1];
@@ -231,10 +433,10 @@ function render() {
   shareTextPreview.textContent = buildShareText();
 
   const winPct = stats.played > 0 ? Math.round((stats.wins / stats.played) * 100) : 0;
-  document.getElementById('stat-played')!.textContent = String(stats.played);
-  document.getElementById('stat-winrate')!.textContent = `${winPct}%`;
-  document.getElementById('stat-streak')!.textContent = String(stats.currentStreak);
-  document.getElementById('stat-best')!.textContent = String(stats.bestStreak);
+  document.getElementById('stat-played').textContent = String(stats.played);
+  document.getElementById('stat-winrate').textContent = `${winPct}%`;
+  document.getElementById('stat-streak').textContent = String(stats.currentStreak);
+  document.getElementById('stat-best').textContent = String(stats.bestStreak);
 }
 
 function resetDeleteConfirmation() {
@@ -242,7 +444,7 @@ function resetDeleteConfirmation() {
   deleteAccountBtn.textContent = 'Delete Account & Data';
 }
 
-function openModal(id: string) {
+function openModal(id) {
   setBurgerOpen(false);
   resetDeleteConfirmation();
   loginDrawer.classList.remove('is-open');
@@ -253,7 +455,7 @@ function openModal(id: string) {
   el.classList.add('flex');
 }
 
-function closeModal(id: string) {
+function closeModal(id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.classList.add('hidden');
@@ -264,7 +466,7 @@ burgerBtn.addEventListener('click', () => {
   setBurgerOpen(!burgerOpen);
 });
 
-(['c', 'm', 'y', 'k'] as const).forEach((ch) => {
+['c', 'm', 'y', 'k'].forEach((ch) => {
   inputs[ch].addEventListener('input', () => {
     const parsed = parseInt(inputs[ch].value, 10);
     currentGuess[ch] = Number.isNaN(parsed) ? 0 : clampChannel(parsed);
@@ -272,9 +474,9 @@ burgerBtn.addEventListener('click', () => {
   });
 });
 
-document.querySelectorAll<HTMLButtonElement>('[data-channel]').forEach((btn) => {
+document.querySelectorAll('[data-channel]').forEach((btn) => {
   btn.addEventListener('click', () => {
-    const ch = btn.dataset.channel as keyof CMYK;
+    const ch = btn.dataset.channel;
     const delta = parseInt(btn.dataset.delta || '0', 10);
     currentGuess[ch] = clampChannel(currentGuess[ch] + delta);
     inputs[ch].value = String(currentGuess[ch]);
@@ -307,25 +509,25 @@ guessForm.addEventListener('submit', async (e) => {
   }
 });
 
-document.querySelectorAll<HTMLButtonElement>('[data-toggle-theme]').forEach((btn) => {
+document.querySelectorAll('[data-toggle-theme]').forEach((btn) => {
   btn.addEventListener('click', () => {
     darkMode = !darkMode;
     applyTheme();
   });
 });
 
-document.querySelectorAll<HTMLButtonElement>('[data-open-modal]').forEach((btn) => {
-  btn.addEventListener('click', () => openModal(btn.dataset.openModal!));
+document.querySelectorAll('[data-open-modal]').forEach((btn) => {
+  btn.addEventListener('click', () => openModal(btn.dataset.openModal));
 });
 
-document.getElementById('btn-gameover-results')!.addEventListener('click', () => openModal('modal-results'));
+document.getElementById('btn-gameover-results').addEventListener('click', () => openModal('modal-results'));
 
-document.querySelectorAll<HTMLButtonElement>('[data-close-modal]').forEach((btn) => {
-  btn.addEventListener('click', () => closeModal(btn.dataset.closeModal!));
+document.querySelectorAll('[data-close-modal]').forEach((btn) => {
+  btn.addEventListener('click', () => closeModal(btn.dataset.closeModal));
 });
 
-document.getElementById('btn-copy-share')!.addEventListener('click', async (e) => {
-  const btn = e.currentTarget as HTMLButtonElement;
+document.getElementById('btn-copy-share').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
   await navigator.clipboard.writeText(buildShareText());
   btn.textContent = 'Copied';
   setTimeout(() => {
@@ -396,7 +598,7 @@ deleteAccountBtn.addEventListener('click', async () => {
   targetCmyk = null;
   targetName = null;
   stats = { played: 0, wins: 0, currentStreak: 0, bestStreak: 0 };
-  (['c', 'm', 'y', 'k'] as const).forEach((ch) => {
+  ['c', 'm', 'y', 'k'].forEach((ch) => {
     inputs[ch].value = String(currentGuess[ch]);
   });
   resetDeleteConfirmation();

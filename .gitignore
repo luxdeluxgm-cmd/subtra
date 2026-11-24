@@ -4,8 +4,6 @@ dist-ssr
 *.local
 .env
 .env.*
-!.env.example
 .vscode/*
-!.vscode/extensions.json
 .idea
 .DS_Store

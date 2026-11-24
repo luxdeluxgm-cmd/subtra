@@ -1,0 +1,16 @@
+name: Supabase Keep-Alive
+
+on:
+  schedule:
+    - cron: '0 8 */3 * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping get_subtra_puzzle RPC
+        run: |
+          curl -s -X POST "https://xvavozayjwbnlzickvzt.supabase.co/rest/v1/rpc/get_subtra_puzzle" \
+            -H "apikey: sb_publishable_yDilPH6_eiJUHnHOHNtK4g_Ej5SLPwK" \
+            -H "Content-Type: application/json" > /dev/null
