@@ -23,7 +23,7 @@ const supabase = isSupabaseConfigured
 
 function clampChannel(val) {
   if (Number.isNaN(val)) return 0;
-  return Math.min(100, Math.max(0, Math.round(val)));
+  return Math.min(100, Math.max(0, Math.round(val / 5) * 5));
 }
 
 function cmykToRgb({ c, m, y, k }) {
@@ -469,7 +469,14 @@ burgerBtn.addEventListener('click', () => {
 ['c', 'm', 'y', 'k'].forEach((ch) => {
   inputs[ch].addEventListener('input', () => {
     const parsed = parseInt(inputs[ch].value, 10);
+    if (!Number.isNaN(parsed)) {
+      currentGuess[ch] = Math.min(100, Math.max(0, parsed));
+    }
+  });
+  inputs[ch].addEventListener('blur', () => {
+    const parsed = parseInt(inputs[ch].value, 10);
     currentGuess[ch] = Number.isNaN(parsed) ? 0 : clampChannel(parsed);
+    inputs[ch].value = String(currentGuess[ch]);
     saveDraftGuess();
   });
 });
@@ -488,6 +495,13 @@ guessForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (gameOver || submitting) return;
 
+  ['c', 'm', 'y', 'k'].forEach((ch) => {
+    const parsed = parseInt(inputs[ch].value, 10);
+    currentGuess[ch] = Number.isNaN(parsed) ? 0 : clampChannel(parsed);
+    inputs[ch].value = String(currentGuess[ch]);
+  });
+  saveDraftGuess();
+
   submitting = true;
   submitBtn.disabled = true;
   submitBtn.textContent = 'CHECKING...';
@@ -496,12 +510,16 @@ guessForm.addEventListener('submit', async (e) => {
 
   submitting = false;
   submitBtn.disabled = false;
-  submitBtn.textContent = 'GUESS';
 
   if (error || !state) {
+    submitBtn.textContent = 'CONNECTION ERROR — RETRY';
+    setTimeout(() => {
+      if (!submitting) submitBtn.textContent = 'GUESS';
+    }, 2000);
     return;
   }
 
+  submitBtn.textContent = 'GUESS';
   applyServerState(state);
 
   if (state.gameOver) {
@@ -524,6 +542,27 @@ document.getElementById('btn-gameover-results').addEventListener('click', () => 
 
 document.querySelectorAll('[data-close-modal]').forEach((btn) => {
   btn.addEventListener('click', () => closeModal(btn.dataset.closeModal));
+});
+
+document.querySelectorAll('[role="dialog"]').forEach((modal) => {
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      closeModal(modal.id);
+    }
+  });
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('[role="dialog"]').forEach((modal) => {
+      if (!modal.classList.contains('hidden')) {
+        closeModal(modal.id);
+      }
+    });
+    if (burgerOpen) {
+      setBurgerOpen(false);
+    }
+  }
 });
 
 document.getElementById('btn-copy-share').addEventListener('click', async (e) => {
@@ -631,11 +670,23 @@ initAuth(async (user, isInitial) => {
   }
 });
 
+let currentUtcDay = new Date().toISOString().slice(0, 10);
+
 setInterval(() => {
   utcCountdown.textContent = getNextUtcMidnightCountdown();
+  const nowUtcDay = new Date().toISOString().slice(0, 10);
+  if (nowUtcDay !== currentUtcDay) {
+    currentUtcDay = nowUtcDay;
+    syncFromServer();
+  }
 }, 1000);
 utcCountdown.textContent = getNextUtcMidnightCountdown();
 
 applyTheme();
 render();
 syncFromServer();
+
+if (!localStorage.getItem('subtra_seen_rules')) {
+  localStorage.setItem('subtra_seen_rules', '1');
+  openModal('modal-how-to-play');
+}
