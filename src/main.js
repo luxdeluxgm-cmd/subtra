@@ -160,21 +160,62 @@ async function signInOrRegisterWithEmail(email, password) {
   return { error: null, message: 'Account created and signed in.' };
 }
 
-async function linkGoogleAccount() {
-  if (!supabase) return 'Database is not connected yet.';
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (sessionData.session?.user?.is_anonymous) {
-    const { error } = await supabase.auth.linkIdentity({
-      provider: 'google',
-      options: { redirectTo: window.location.origin },
+const GOOGLE_CLIENT_ID =
+  import.meta.env.VITE_GOOGLE_CLIENT_ID ||
+  '1062931587296-ueg07eprtn4oc44t3ijq7ir23d9tndk4.apps.googleusercontent.com';
+
+let gsiLoaded = false;
+
+function initGoogleDirectButton(container, onError, onSuccess) {
+  if (!supabase || !container) return;
+
+  const renderBtn = () => {
+    if (!window.google?.accounts?.id) return;
+    window.google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: async (response) => {
+        if (!response?.credential) {
+          onError('Google sign-in was cancelled.');
+          return;
+        }
+        const { error } = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: response.credential,
+        });
+        if (error) {
+          onError(error.message);
+          return;
+        }
+        onSuccess();
+      },
     });
-    return error ? error.message : null;
+    container.innerHTML = '';
+    window.google.accounts.id.renderButton(container, {
+      theme: document.documentElement.classList.contains('dark') ? 'filled_black' : 'outline',
+      size: 'large',
+      width: 320,
+      text: 'continue_with',
+    });
+  };
+
+  if (gsiLoaded && window.google?.accounts?.id) {
+    renderBtn();
+    return;
   }
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo: window.location.origin },
-  });
-  return error ? error.message : null;
+
+  const existing = document.getElementById('gsi-client-script');
+  if (existing) return;
+
+  const script = document.createElement('script');
+  script.id = 'gsi-client-script';
+  script.src = 'https://accounts.google.com/gsi/client';
+  script.async = true;
+  script.defer = true;
+  script.onload = () => {
+    gsiLoaded = true;
+    renderBtn();
+  };
+  document.head.appendChild(script);
 }
 
 async function signOutAccount() {
@@ -280,7 +321,7 @@ const loginDrawer = document.getElementById('login-drawer');
 const emailAuthForm = document.getElementById('email-auth-form');
 const authEmailInput = document.getElementById('auth-email');
 const authPasswordInput = document.getElementById('auth-password');
-const googleBtn = document.getElementById('btn-link-google');
+const googleBtnContainer = document.getElementById('google-btn-container');
 const signOutBtn = document.getElementById('btn-sign-out');
 const deleteAccountBtn = document.getElementById('btn-delete-account');
 const burgerBtn = document.getElementById('btn-burger');
@@ -575,7 +616,22 @@ document.getElementById('btn-copy-share').addEventListener('click', async (e) =>
 });
 
 toggleLoginBtn.addEventListener('click', () => {
+  const opening = !loginDrawer.classList.contains('is-open');
   loginDrawer.classList.toggle('is-open');
+  if (opening) {
+    initGoogleDirectButton(
+      googleBtnContainer,
+      (err) => {
+        accountFeedback.textContent = err;
+        accountFeedback.classList.remove('hidden');
+      },
+      async () => {
+        accountFeedback.textContent = 'Signed in with Google.';
+        accountFeedback.classList.remove('hidden');
+        await syncFromServer();
+      }
+    );
+  }
 });
 
 emailAuthForm.addEventListener('submit', async (e) => {
@@ -594,14 +650,6 @@ emailAuthForm.addEventListener('submit', async (e) => {
   accountFeedback.textContent = message;
   accountFeedback.classList.remove('hidden');
   await syncFromServer();
-});
-
-googleBtn.addEventListener('click', async () => {
-  const err = await linkGoogleAccount();
-  if (err) {
-    accountFeedback.textContent = err;
-    accountFeedback.classList.remove('hidden');
-  }
 });
 
 signOutBtn.addEventListener('click', async () => {
